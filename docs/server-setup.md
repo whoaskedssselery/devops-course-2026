@@ -105,3 +105,31 @@ sudo ufw logging medium
 | `01-clean-install` | 15:18 | чистая установка Ubuntu Server 24.04, обновления |
 | `02-keys-configured` | 15:23 | пользователь `devops`, вход по ключу, `~/.ssh/config` на хосте |
 | `03-ssh-hardened` | 15:27 | усиление SSH: порт 2222, без `root` и паролей (межсетевой экран и имя узла настроены после снимка) |
+
+## 8. Веб-сервер
+
+| Параметр | Значение |
+|---|---|
+| Устанавливаемый пакет | `nginx` 1.24.0 (репозиторий Ubuntu), `sudo apt install -y nginx` |
+| Конфигурация ресурса | `/etc/nginx/sites-available/devops-site`, активирована ссылкой в `/etc/nginx/sites-enabled/`; стандартный ресурс отключён (`sudo rm /etc/nginx/sites-enabled/default`) |
+| Каталог ресурса | `/var/www/devops-site`, владелец `devops:devops`, права `755` (каталог) и `644` (файлы); содержимое доставляется `scripts/deploy.sh` (`rsync --delete --chmod=D755,F644`) |
+| Сертификат | `/etc/ssl/certs/devops.crt`, владелец `root`, права `644`; срок действия — 365 суток (самоподписанный, SAN `DNS:devops.local`) |
+| Закрытый ключ | `/etc/ssl/private/devops.key`, владелец `root`, права `600` |
+| Журналы | `/var/log/nginx/devops-site.access.log`, `/var/log/nginx/devops-site.error.log` |
+
+Команда формирования сертификата:
+
+```
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/ssl/private/devops.key \
+  -out /etc/ssl/certs/devops.crt \
+  -subj "/CN=devops.local" \
+  -addext "subjectAltName=DNS:devops.local"
+```
+
+Конфигурация ресурса состоит из двух блоков `server`: блок на порту 80 возвращает
+`301 https://$host$request_uri`; блок на порту 443 (`ssl`, `ssl_protocols TLSv1.2 TLSv1.3`) содержит
+пути к сертификату и ключу, `root /var/www/devops-site`, `try_files $uri $uri/ =404`,
+`error_page 404 /404.html` и отдельные журналы. Каталог ресурса: `sudo mkdir -p /var/www/devops-site`,
+`sudo chown -R devops:devops /var/www/devops-site`. Применение конфигурации:
+`sudo nginx -t && sudo systemctl reload nginx` (не `restart`). Заголовок HSTS не добавляется.
