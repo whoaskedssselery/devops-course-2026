@@ -133,3 +133,20 @@ sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 `error_page 404 /404.html` и отдельные журналы. Каталог ресурса: `sudo mkdir -p /var/www/devops-site`,
 `sudo chown -R devops:devops /var/www/devops-site`. Применение конфигурации:
 `sudo nginx -t && sudo systemctl reload nginx` (не `restart`). Заголовок HSTS не добавляется.
+
+## 9. Контейнеризация
+
+| Параметр | Значение |
+|---|---|
+| Docker Engine | 29.9.1, установлен из официального репозитория `download.docker.com` (пакеты `docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-buildx-plugin`, `docker-compose-plugin` v5.6.0); пакет `docker.io` не используется |
+| Участники группы `docker` | `devops` (членство даёт права, фактически равные `root`) |
+| Проект на сервере | `/home/devops/app` (доставка с хоста: `rsync -avz --delete --exclude=.env app/ devops:app/`) |
+| Файл `.env` | `/home/devops/app/.env`, права `600`, владелец `devops`; в репозиторий не включается (`.gitignore`), шаблон — `app/.env.example` |
+| Публикуемые порты | `127.0.0.1:5000` → `5000` (приложение); порт СУБД `5432` не публикуется, приложение обращается к `db` через сеть проекта `app_backend` |
+| Именованные тома | `app_db_data` (`/var/lib/postgresql/data`) |
+| Обратный прокси | в HTTPS-блок `/etc/nginx/sites-available/devops-site` добавлен `location /app/` с `proxy_pass http://127.0.0.1:5000/` и заголовками `Host`, `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto`; статический ресурс сохранён |
+
+Запуск проекта: `cd ~/app && docker compose up -d --build`. Остановка с сохранением данных —
+`docker compose down`; `docker compose down -v` удаляет тома вместе с данными.
+Порт, опубликованный Docker на всех адресах, обходит правила UFW (правила Docker в таблице `nat`),
+поэтому порт приложения публикуется только на `127.0.0.1`.
