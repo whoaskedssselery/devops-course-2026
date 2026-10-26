@@ -1,4 +1,4 @@
-﻿# Конфигурация виртуальной машины devops-vm
+# Конфигурация виртуальной машины devops-vm
 
 Гипервизор: VirtualBox 7.x на хосте Windows. Гостевая система: Ubuntu Server 24.04.5 LTS.
 
@@ -149,3 +149,45 @@ sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 Порты 80 и 443 уже разрешены в UFW (раздел 6); правило `ufw allow 'Nginx Full'` не создаётся.
 
 Доставка содержимого: `scripts/deploy.sh` (rsync с `--delete --chmod=D755,F644`, без интерактивного ввода пароля) с хоста. Сертификат для проверки на хосте: `scp devops:/etc/ssl/certs/devops.crt ~/devops.crt`, затем `curl --cacert ~/devops.crt https://devops.local`.
+
+## 9. Контейнеризация
+
+| Параметр | Значение |
+|---|---|
+| Docker Engine | установлен из официального репозитория `download.docker.com` (метод apt, файл `/etc/apt/sources.list.d/docker.sources`), версия 29.9.2; пакеты `docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-buildx-plugin`, `docker-compose-plugin` (Compose v5.6.1); пакет `docker.io` из репозитория Ubuntu не используется |
+| Группа `docker` | `devops` (участник группы фактически имеет права root: может смонтировать `/` хоста в контейнер) |
+| Проект на сервере | `~/app` (`/home/devops/app`): `Dockerfile`, `app.py`, `requirements.txt`, `docker-compose.yml`, `.dockerignore`, `.env.example`, `.env` |
+| Файл `.env` | `~/app/.env`, владелец `devops`, права `600`; создаётся только на сервере (`cp .env.example .env`, пароль `openssl rand -hex 16`); в репозиторий не добавляется (`.gitignore`), исключён из доставки (`rsync --exclude=.env`) и из контекста сборки (`.dockerignore`) |
+| Сервисы | `app` (образ `devops-app:1.0`, процесс от пользователя `app`), `db` (`postgres:16-alpine`, healthcheck `pg_isready`) |
+| Публикуемые порты | приложение — `127.0.0.1:5000:5000` (только loopback); порт СУБД `5432` не публикуется |
+| Именованные тома | `app_db_data` (данные PostgreSQL, `/var/lib/postgresql/data`) |
+| Сеть | `app_backend` (bridge), приложение обращается к СУБД по имени `db` (`DB_HOST=db`) |
+| Перезапуск | `restart: unless-stopped` для обоих сервисов |
+
+Конфигурация обратного прокси-сервера (`/etc/nginx/sites-available/devops-site`, блок HTTPS):
+
+```
+    location /app/ {
+        proxy_pass http://127.0.0.1:5000/;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+```
+
+Завершающий `/` в `proxy_pass` заменяет префикс `/app/` на `/`. Статический ресурс (`location /`) сохранён.
+
+Порт, опубликованный на `0.0.0.0`, доступен из сети в обход UFW (Docker добавляет правила в собственные цепочки iptables), поэтому публикация только на `127.0.0.1`.
+
+Запуск и проверка:
+
+```
+cd ~/app
+docker compose up -d --build
+docker compose ps
+curl -s http://127.0.0.1:5000/
+curl --cacert ~/devops.crt https://devops.local/app/
+```
+
+Команда `docker compose down -v` удаляет том с данными и на рабочем сервере не используется.
