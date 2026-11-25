@@ -191,3 +191,23 @@ curl --cacert ~/devops.crt https://devops.local/app/
 ```
 
 Команда `docker compose down -v` удаляет том с данными и на рабочем сервере не используется.
+
+## 10. Ansible
+
+- Расположение проекта: каталог `ansible/` репозитория.
+- Управляющий узел: WSL Ubuntu на хостовой системе; управляемый узел: devops-vm (192.168.56.101).
+- Inventory: `inventory/bootstrap.ini` (первичный запуск), `inventory/prod.ini` (повторные запуски).
+- Учётные записи: `student` для bootstrap (вход по паролю), `devops` для prod (вход по ключу, sudo без пароля).
+- Роли: `base` (проверка ОС, пакеты, репозиторий и служба Docker), `ssh` (пользователь, ключ, sudo, настройки SSH, UFW), `nginx` (обратный прокси), `app` (образ, контейнер, проверка /health).
+- Образ: `ghcr.io/whoaskedssselery/devops-ci-app` (пакет публичный, вход для чтения не нужен).
+- Развёрнутый SHA: `f9d91e808a63a99f47df4eb91ee233d97049a9c8`.
+- Порт контейнера: 5000, опубликован только на 127.0.0.1; снаружи доступ через Nginx на порту 80.
+- Health endpoint: `/health`.
+
+Команды выполняются из каталога `ansible/`:
+
+```
+ansible-playbook -i inventory/bootstrap.ini site.yml --ask-pass --ask-become-pass   # первичный запуск
+ansible-playbook site.yml                                                          # повторный запуск
+ansible-playbook verify.yml                                                        # аудит без изменений
+```
